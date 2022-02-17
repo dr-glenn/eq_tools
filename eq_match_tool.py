@@ -381,11 +381,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def clickMatch(self, value):
         # handler for any of the match quality buttons
-        self.storeMatch(value, self.is_new)
+        self.storeMatch(self.region, value, self.is_new)
         self.clickNext()
 
-    def storeMatch(self,quality, is_new):
-        self.matchRecords.storeMatchRecord(self.imgName, self.templ_date, self.det_date, quality, is_new)
+    def storeMatch(self, region, quality, is_new):
+        self.matchRecords.saveMatch(self.imgName, self.templ_date, self.det_date, region, quality, is_new)
 
     def showDates(self, templ_date, det_date):
         # show the template and detection dates
@@ -425,10 +425,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.inCatalogValue.setStyleSheet('color: green')
         # display the template location on a map
         location = (ev['longitude'], ev['latitude'], ev['depth'])
-        region = str(ev['region'])
+        self.region = str(ev['region'])
         self.evRegionValue.setText('{}'.format(region))
         self.magnitudeValue.setText('{:.1f}'.format(ev['mag']))
         self.mapMarker(location)
+        print('changeImage: END')
 
     def clickPrev(self):
         self.fileIndex -= 1
@@ -441,11 +442,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.fileIndex += 1
         if self.fileIndex > len(self.files):
             self.fileIndex -= 1
-        #print('clickNext: index={}'.format(self.fileIndex))
-        #print('clickNext: files len={}'.format(len(self.files)))
-        #print('clickNext: type(files): {}'.format(type(self.files)))
+        print('clickNext: index={}'.format(self.fileIndex))
+        print('clickNext: files len={}'.format(len(self.files)))
+        print('clickNext: type(files): {}'.format(type(self.files)))
         self.imgName = self.files[self.fileIndex]
-        #print('clickNext: imgName={}'.format(self.imgName))
+        print('clickNext: imgName={}'.format(self.imgName))
         self.changeImage(self.imgName)
 
     def showImage(self, image_name):
@@ -464,12 +465,15 @@ class Stations:
 class MatchRecords:
     # keep a list of all match images that we have reviewed
     # TODO: change this to use DictWriter or Pandas
-    def __init__(self, csvfile):
+    def __init__(self, csvfile = MATCH_RECORD_FILE):
+        self.recordFile = csvfile
+        self.df = None
         self.matchFiles = []    # list of all filenames we've reviewed
         if os.path.isfile(csvfile):
-            self.fp, self.writer = self.openMatchFile(csvfile)
+            #self.fp, self.writer = self.openMatchFile(csvfile)
+            self.readFile()
         else:
-            self.fp, self.writer = self.createMatchFile(csvfile)
+            self.createDF()
 
     def getFilenames(self):
         return self.matchFiles
@@ -480,6 +484,37 @@ class MatchRecords:
         writer = csv.writer(f)
         writer.writerow(['file','templ_date','detect_date','quality','is_new'])
         return f,writer
+
+    def createDF(self):
+        self.df = pd.DataFrame(columns=['file','templ_date','detect_date','region','quality','is_new'])
+
+    def readFile(self, csvfile):
+        self.df = pd.read_csv(csvfile)
+        self.matchFiles = self.df['file'].tolist()
+
+    def saveMatch(self, match_file, templ_date, det_date, region, quality, is_new):
+        '''
+        Stores our evaluation of the match quality in file.
+        Also adds the match_file name to internal list so that we know we've seen it during this session.
+        :param match_file: filename of match image file
+        :param templ_date: date of the template (also embedded in the filename)
+        :param det_date: date of the detection (also embedded in the filename)
+        :param region: designation for the region that the template is located in
+        :param quality: evaluated quality of detection, a number from 1 to 4
+        :param is_new: False: if detection is another template that we already have.
+        :return:
+        '''
+        print('saveMatch: {},{},{},{},{},{}'.format(match_file,templ_date,det_date,region,quality,is_new))
+        tstr = templ_date.strftime('%Y-%m-%d %H:%M:%S')
+        dstr = det_date.strftime('%Y-%m-%d %H:%M:%S')
+        match = {'file':match_file,'templ_date':tstr,'detect_date':dstr,'quality':quality,'is_new':is_new,'region':region}
+        #self.df = self.df.append([match_file,tstr,dstr,quality,is_new])
+        #self.df = self.df.append(match)
+        print(match)
+        newdf = pd.DataFrame([match,])
+        print(newdf)
+        self.df = pd.concat([self.df, newdf])
+        print('saveMatch: END')
 
     def openMatchFile(self, csvfile = MATCH_RECORD_FILE):
         nline = 0
@@ -512,27 +547,7 @@ class MatchRecords:
         self.writer.writerow([match_file, tstr, dstr, quality, is_new])
 
     def close(self):
-        self.fp.close()
-
-def find_time(df, detect_t, time_diff=30, dt_format='%Y-%m-%dT%H-%M-%S'):
-    '''
-    Match detect_t with template_time. Return a Dataframe of matches.
-    Use this to retrieve a template event location.
-    Or use it to discover if a detection is another event that is already present as a template.
-    :param df: DataFrame with time field
-    :param detect_t: datetime object
-    :param dt_format:
-    :return: a Dataframe. Expect only one row in the df.
-    '''
-    # detect_t is from the filename of a match_filter PNG image
-    # PNG filename: Templ-2018-05-19T08-14-07_Det-2018-05-22T05-24-26.png
-    # Make approximate match. Within 30 seconds?
-    #
-    # return the data from pandas with lat-long and region number
-    tdiff = dt.timedelta(seconds=time_diff)
-    new_df = df[df['time'].apply(lambda x: dt_match(detect_t, x, tdiff))]
-    #print(new_df)
-    return new_df
+        self.df.to_csv(self.recordFile, index=False)
 
 class EqTemplates:
     # maintain a list of all templates and enable lookup of their event data
