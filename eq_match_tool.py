@@ -1,25 +1,22 @@
-# This is a sample Python script.
+# Review EqCorrScan detection images and assign quality rating
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+# TODO: generate a table that displays number of events in region and number that have been evaluated.
+
 import sys
 import os
 from PyQt5 import QtCore,QtGui, QtWidgets
-import matplotlib
 import matplotlib.pyplot as plt
 from PyQt5.QtWidgets import QVBoxLayout,QHBoxLayout,QGridLayout
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-#import cartopy.crs as ccrs
+#import cartopy.crs as ccrs     # bummer, I can't install cartopy due to proj4 difficulties
 from mpl_toolkits.basemap import Basemap
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes,zoomed_inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from qt5_match import Ui_MainWindow
-#from obspy import UTCDateTime
 import datetime as dt
 import numpy as np
 import pandas as pd
-import csv
-csv_writer = None
+#import csv
 
 IMAGE_DIR = '/proj/shumagin/gnelson/plots/detections'
 MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
@@ -47,8 +44,8 @@ def timing(f):
 def dt_match(dt1, dt2, dt_diff=DT_MATCH_VALUE):
     '''
     Compare datetime values. True if they differ by less than dt_diff
-    :param dt1:
-    :param dt2:
+    :param dt1: datetime value
+    :param dt2: datetime value
     :param dt_diff: datetime.timedelta value
     :return: True if match
     '''
@@ -60,34 +57,34 @@ class MatchImages:
     Contains df (Pandas DataFrame) with templ_dt and region as columns.
     Method _findRegion will lookup the region by searching EqTemplates object.
     '''
-    def __init__(self, path, templates):
+    def __init__(self, path, templates, match_file=MATCH_RECORD_FILE):
         self.imageDir = path
         self.templates = templates
-        # TODO: keep full list always, keep separate filtered list
-        # TODO: regionLookup is dumb, should just merge with allFiles
-        self.regionLookup = {}
-        df = pd.DataFrame(columns=['filename','templ_dt','det_dt','region'])
-        self.allFiles = None
-        self.notSeenFiles = None
-        self.files = None   # this is the current working set after all filters
-        files = []
-        with os.scandir(self.imageDir) as ls:
-            for item in ls:
-                if item.is_file():
-                    filename = str(item.name)
-                    files.append(filename)
-        print('MatchImages: len = {}'.format(len(files)))
-        self.allFiles = sorted(files)   # it will sort on template date
-        self.files = self.allFiles
-        rows = []
-        for file in self.allFiles:
-            templ_dt, det_dt = self.parseImageFilename(file)
-            f_dict = {'filename':file, 'templ_dt':templ_dt, 'det_dt':det_dt, 'region':'-'}
-            rows.append(f_dict)
-        self.df = df.append(rows, ignore_index=True)
-        self.df = self.df.sort_values(by=['templ_dt'])
-        #print(self.df)
-        self._findRegions(templates)
+        self.match_file = match_file
+        self.index = -1 # row index in self.df
+        self.region = 'All'
+        self.savefile = False
+        if not os.path.isfile(match_file):
+            print('ERROR: {} must be created by gen_csv.py'.format(match_file))
+            sys.exit(1)
+
+        # self.df has regions assigned to each image and columns for 'quality' and 'is_new'
+        self.df = self.readFile(match_file)
+        self.df_select = self.df     # this will be the working view of self.df
+        # TODO: filtering already seen images should be optional so we can review old quality assignments
+        # select images that do not yet have 'quality' assigned
+        self.image_files = []
+        print('MatchImages: {} images before removeSeen'.format(self.df.shape[0]))
+        self.removeSeen()
+        print('MatchImages: {} images'.format(len(self.image_files)))
+        self.tallyRegions()
+
+    def save(self):
+        if self.savefile:
+            self.df.to_csv(self.match_file, index=False)
+            print('MatchImages.save: updating file {}}'.format(self.match_file))
+        else:
+            print('MatchImages.save: no update to {}}'.format(self.match_file))
 
     @classmethod
     def parseImageFilename(cls, imgName):
@@ -98,11 +95,16 @@ class MatchImages:
         det_date = dt.datetime.strptime(d[len('Det-'):], '%Y-%m-%dT%H-%M-%S')
         return templ_date,det_date
 
+    def readFile(self, file):
+        date_cols = ['templ_dt', 'det_dt']
+        df = pd.read_csv(file, dtype={'region':'string'}, parse_dates=date_cols)
+        return df
+
     @timing
     def _findRegions(self, templates):
         # Match all image filenames with assigned region for the template
         # compare columns in 2 DF for matches: https://datascience.stackexchange.com/questions/33053/how-do-i-compare-columns-in-different-data-frames
-        print(self.df)
+        #print(self.df)
         cnt = 1
         # TODO: need vast improvement in speed
         # both templates and this use DF sorted by templ_dt
@@ -125,7 +127,6 @@ class MatchImages:
                 else:
                     match = templates.find(templ_dt)  # return a DF of record from EV_SELECTED_REGION
                     print('new match at {}, dt={}'.format(cnt,match.iloc[0]['templ_dt']))
-                    #print('new match at {}, dt={}'.format(cnt,templ_dt))
                 tdt = templ_dt
                 if not match.empty:
                     region = match.iloc[0]['region']
@@ -135,42 +136,48 @@ class MatchImages:
             except:
                 print('ERROR in _findRegions: file={}'.format(row['filename']))
 
-    # My original attempt is painfully slow.
-    @timing
-    def _findRegions0(self, templates):
-        # Match all image filenames with assigned region for the template
-        cnt = 1
-        # TODO: use self.df
-        for file in self.allFiles:
-            if cnt % 250 == 0:
-                print('findRegions: {}'.format(cnt))
-            cnt += 1
-            try:
-                templ_dt, det_dt = self.parseImageFilename(file)
-                match = templates.find(templ_dt)  # return a DF of record from EV_SELECTED_REGION
-                if not match.empty:
-                    region = match.iloc[0]['region']
-                    if not region in self.regionLookup:
-                        self.regionLookup[region] = list()
-                    self.regionLookup[region].append(file)
-            except:
-                print('ERROR in _findRegions: file={}'.format(file))
+    def tallyRegions(self):
+        '''
+        Count of image files in each region.
+        Count of image files that have not yet been evaluated.
+        :return:
+        '''
+        # TODO: add a count of evaluated files
+        self.region_count = self.df['region'].value_counts()
+        print('Region\tCount\n{}'.format(self.region_count))
+        self.unseen_count = self.df_select['region'].value_counts()
+        print('Unseen\nRegion\tCount\n{}'.format(self.unseen_count))
+
+    def getRegionCounts(self):
+        return self.unseen_count
 
     def getImageDir(self):
         return self.imageDir
 
-    def removeSeen(self, seenFiles):
+    def removeSeen(self):
         '''
         Remove any image files from list if they've already been seen.
-        Modifies self.files, leaves self.allFiles intact.
-        :param seenFiles: list of filenames from MatchRecords
+        Modifies self.image_files
         :return:
         '''
-        #print('removeSeen begin {}, remove {}'.format(len(self.allFiles), len(seenFiles)))
-        notSeen = set(self.allFiles) - set(seenFiles)
-        self.notSeenFiles = sorted(list(notSeen))
-        self.files = self.notSeenFiles
-        #print('removeSeen end {}'.format(len(self.files)))
+        self.df_select = self.df[self.df['quality'] == -1]
+        self.image_files = self.df_select['filename'].tolist()
+
+    def getNext(self):
+        self.index += 1
+        retval = pd.DataFrame()     # empty DF
+        # skip to next unseen
+        print('getNext: index={}, total={}'.format(self.index,self.df_select.shape[0]))
+        while self.index < self.df_select.shape[0]:
+            #print(self.df_select.iloc[self.index]['quality'])
+            if self.df_select.iloc[self.index]['quality'] == -1:
+                retval = self.df_select.iloc[self.index]
+                break
+            self.index += 1
+        # if retval==df.empty, we've reached the end, caller of getNext must do something special
+        if self.index >= self.df_select.shape[0]:
+            print('getNext: no more images in current region')
+        return retval
 
     def filterRegion(self, region='All'):
         '''
@@ -179,21 +186,49 @@ class MatchImages:
         :param region: 'All' or other values, '0' to '7' for Shumagin study
         :return:
         '''
-        # TODO: not finished
-        # start with allFiles, reapply removeSeen, and finally select only the images from region
-        #self.removeSeen()
+        # TODO: should probably have a single method for filter that combines both region and 'seen'
+        # modifies self.image_files
+        self.removeSeen()
+        self.index = -1
         if region == 'All':
-            # TODO: maybe not use AllFiles
-            self.files = self.notSeenFiles
+            self.df_select = self.df
         else:
-            self.files = []
-            if region in self.regionLookup:
-                self.files = self.regionLookup[region]
-        print('filterRegion: {} has {} images'.format(region, len(self.files)))
-        return self.files
+            self.df_select = self.df[self.df['region'] == region]
+        files = self.df_select['filename'].tolist()
+        # self.image_files is list of all files that have not been reviewed for quality
+        # files is list of all files in the region, regardless of review status
+        # use set intersection to get only image_files in region that have not been reviewed
+        files = set(self.image_files) & set(files)
+        print('filterRegion: {} has {} images'.format(region, len(files)))
+        self.image_files = sorted(list(files))
+        return self.image_files
 
     def getFiles(self):
-        return self.files
+        return self.image_files
+
+    def saveMatch(self, match_file, templ_date, det_date, region, quality, is_new):
+        '''
+        Stores our evaluation of the match quality in file.
+        Also adds the match_file name to internal list so that we know we've seen it during this session.
+        :param match_file: filename of match image file
+        :param templ_date: date of the template (also embedded in the filename)
+        :param det_date: date of the detection (also embedded in the filename)
+        :param region: designation for the region that the template is located in
+        :param quality: evaluated quality of detection, a number from 1 to 4
+        :param is_new: False: if detection is another template that we already have.
+        :return:
+        '''
+        #print('saveMatch: {},{},{},{},{},{}'.format(match_file,templ_date,det_date,region,quality,is_new))
+        self.savefile = True
+        tstr = templ_date.strftime('%Y-%m-%d %H:%M:%S')
+        dstr = det_date.strftime('%Y-%m-%d %H:%M:%S')
+        match = {'file':match_file,'templ_date':tstr,'detect_date':dstr,'quality':quality,'is_new':is_new,'region':region}
+        # TODO: find the record and update
+        self.df_select.iloc[self.index, self.df_select.columns.get_loc('is_new')] = is_new
+        self.df_select.iloc[self.index, self.df_select.columns.get_loc('quality')] = quality
+        self.df.iloc[self.df['filename']==match_file, self.df_select.columns.get_loc('is_new')] = is_new
+        self.df.iloc[self.df['filename']==match_file, self.df_select.columns.get_loc('quality')] = quality
+        print('saveMatch: {}'.format(self.df_select.iloc[self.index]))
 
 def mapSetup(axes, bbox):
     '''
@@ -219,21 +254,18 @@ def mapSetup(axes, bbox):
 
 # See https://www.pythonguis.com/tutorials/first-steps-qt-creator/
 class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
-    def __init__(self, matchRecords, matchImages, stations, templates, **kwargs):
+    def __init__(self, matchImages, stations, templates, **kwargs):
         super(MainWindow, self).__init__(**kwargs)
         self.setupUi(self)
-        # must addItems before setupHandlers
-        self.regionSelect.addItems(['All','0','1','2','3','4','5','6','7'])
-        self.setupHandlers()
-        #self.imageDir = IMAGE_DIR
-        self.files = matchImages.getFiles()
-        print('MainWindow.init: files = {}'.format(len(self.files)))
         self.templates = templates
-        self.matchRecords = matchRecords
         self.matchImages = matchImages
         self.stations = stations
-        print('number of files = {}'.format(len(self.files)))
-        self.fileIndex = -1
+        # must addItems before setupHandlers
+        #self.regionSelect.addItems(['All','0','1','2','3','4','5','6','7'])
+        self.region_counts = self.matchImages.getRegionCounts()
+        # TODO: updateRegionSelect should disbale event handler before update and then re-enable
+        self.updateRegionSelect(self.region_counts)
+        self.setupHandlers()
         # TODO: imageDir should not be here, we should be retrieving images from MatchImages class
         self.imageDir = matchImages.getImageDir()
         self.imgName = None
@@ -248,19 +280,28 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.nextButton.clicked.connect(self.clickNext)
         self.prevButton.clicked.connect(self.clickPrev)
         self.saveExitButton.clicked.connect(self.clickSaveExit)
-        #self.saveGoodMatchButton.clicked.connect(self.clickSaveGoodMatch)
         self.saveGoodMatchButton.clicked.connect(lambda: self.clickMatch(4))
         self.saveMaybeMatchButton.clicked.connect(lambda: self.clickMatch(3))
         self.saveNotGoodMatchButton.clicked.connect(lambda: self.clickMatch(2))
         self.saveNoMatchButton.clicked.connect(lambda: self.clickMatch(1))
         self.regionSelect.currentTextChanged.connect(self.changeRegion)
 
+    def updateRegionSelect(self, rcount):
+        '''
+        Clear the regionSelect ComboBox and add only the regions that are currently found in the input image file.
+        :param rcount: generated by tallyRegions, a Series whose index is 'region' with count of images in each region
+        :return:
+        '''
+        self.regionSelect.clear()
+        regions = ['All',]
+        regions.extend(sorted(rcount.index.tolist()))
+        print(regions)
+        self.regionSelect.addItems(regions)
+
     def changeRegion(self):
         region = self.regionSelect.currentText()
-        print('new region {}'.format(region))
-        #templ_df = self.templates.regionSelect(region)
-        self.files = self.matchImages.filterRegion(region)
-        self.fileIndex = -1
+        #print('new region {}'.format(region))
+        self.files = self.matchImages.filterRegion(region)  # loads new DF and changes image index to -1
         self.clickNext()
 
     def makeMapPlot(self, ax1=None):
@@ -271,7 +312,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         '''
         if not ax1:
             fig, ax1 = plt.subplots()
-            #print(ax1)
             self.plotWidget = FigureCanvas(fig)
             self.map_axes = ax1
             lay = QVBoxLayout()
@@ -356,21 +396,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         lay.addWidget(self.plotWidget)
         self.mapWidget.setLayout(lay)
 
-    def setLast(self,lastfile):
-        '''
-        Start with last event viewed, if any.
-        Find lastfile in the list of all files, set the index and bring up display of next image.
-        :param lastfile: filename of a template match PNG file.
-        :return:
-        '''
-        if lastfile:
-            idx = self.files.index(lastfile)
-            if idx >= 0 and idx < len(self.files):
-                self.fileIndex = idx
-            else:
-                print('ERROR: last={}, but not found in list'.format(lastfile))
-        self.clickNext()
-
     def clickSaveExit(self):
         '''
         store the last image we looked at, so we can resume later
@@ -385,7 +410,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.clickNext()
 
     def storeMatch(self, region, quality, is_new):
-        self.matchRecords.saveMatch(self.imgName, self.templ_date, self.det_date, region, quality, is_new)
+        #self.matchRecords.saveMatch(self.imgName, self.templ_date, self.det_date, region, quality, is_new)
+        self.matchImages.saveMatch(self.imgName, self.templ_date, self.det_date, region, quality, is_new)
 
     def showDates(self, templ_date, det_date):
         # show the template and detection dates
@@ -393,7 +419,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.matchDateLabel.setText(det_date.strftime('%Y-%m-%d %H:%M:%S'))
 
     def changeImage(self, imgName):
-        print('changeImage: {}'.format(imgName))
+        #print('changeImage: {}'.format(imgName))
         self.filenameLabel.setText(imgName) # display the image filename
         # extract template date and detection date
         f,x = imgName.split('.')
@@ -426,28 +452,24 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # display the template location on a map
         location = (ev['longitude'], ev['latitude'], ev['depth'])
         self.region = str(ev['region'])
-        self.evRegionValue.setText('{}'.format(region))
+        self.evRegionValue.setText('{}'.format(self.region))
         self.magnitudeValue.setText('{:.1f}'.format(ev['mag']))
         self.mapMarker(location)
-        print('changeImage: END')
+        #print('changeImage: END')
 
     def clickPrev(self):
-        self.fileIndex -= 1
-        if self.fileIndex < 0:
-            self.fileIndex = 0
-        self.imgName = self.files[self.fileIndex]
-        self.changeImage(self.imgName)
+        pass
 
     def clickNext(self):
-        self.fileIndex += 1
-        if self.fileIndex > len(self.files):
-            self.fileIndex -= 1
-        print('clickNext: index={}'.format(self.fileIndex))
-        print('clickNext: files len={}'.format(len(self.files)))
-        print('clickNext: type(files): {}'.format(type(self.files)))
-        self.imgName = self.files[self.fileIndex]
-        print('clickNext: imgName={}'.format(self.imgName))
-        self.changeImage(self.imgName)
+        df = self.matchImages.getNext()
+        if df.empty:
+            print('clickNext: empty df: reset to All regions')
+            self.messageBox.setText('Reset to All: no more images in current region')
+            self.regionSelect.setCurrentIndex(0)
+        else:
+            self.messageBox.setText('')
+            self.imgName = df['filename']
+            self.changeImage(self.imgName)
 
     def showImage(self, image_name):
         image_profile = QtGui.QImage(image_name)
@@ -461,7 +483,7 @@ class Stations:
     # all station locations for plotting on maps
     def __init__(self, station_file=STATION_FILE):
         self.df = pd.read_csv(station_file)
-
+"""
 class MatchRecords:
     # keep a list of all match images that we have reviewed
     # TODO: change this to use DictWriter or Pandas
@@ -548,6 +570,7 @@ class MatchRecords:
 
     def close(self):
         self.df.to_csv(self.recordFile, index=False)
+"""
 
 class EqTemplates:
     # maintain a list of all templates and enable lookup of their event data
@@ -603,16 +626,14 @@ class EqTemplates:
             return new_df
 
 if __name__ == "__main__":
-    #csvfile,csv_writer,lastLine = openMatchFile()
-    matchRecords = MatchRecords(MATCH_RECORD_FILE)
     stations = Stations()
     templates = EqTemplates()
-    matchImages = MatchImages(IMAGE_DIR, templates)
-    matchImages.removeSeen(matchRecords.getFilenames())
+    matchImages = MatchImages(IMAGE_DIR, templates, MATCH_RECORD_FILE)
+    #matchImages.removeSeen()
     app = QtWidgets.QApplication(sys.argv)
-    window = MainWindow(matchRecords, matchImages, stations, templates)
+    window = MainWindow(matchImages, stations, templates)
     window.show()
     retval = app.exec_()
     print('Exiting: {}'.format(retval))
-    matchRecords.close()
+    matchImages.save()
     sys.exit(retval)

@@ -190,7 +190,6 @@ class MatchImages:
         self.templates = templates
         self.match_file = match_file
         if os.path.isfile(match_file):
-            pass    # read existing file
             self.df_old = self.readFile(match_file)
             self.matchFiles = self.df_old['filename'].tolist()
             print('MatchImages: {} is old'.format(match_file))
