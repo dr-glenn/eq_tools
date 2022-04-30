@@ -13,7 +13,7 @@ the trench and downdip. This region is further broken down into smaller rectangl
 in order to run EqCorrScan with smaller numbers of templates for detection.
 
 quality: 4 is a very good match, 3 is a "maybe" match, 2 is a "maybe not" match, and 1 is "no match".
-The file has a value of 0 or '-' if the detection has not been evaluated.
+The file has a value of -1 if the detection has not been evaluated.
 """
 import csv
 import os
@@ -23,13 +23,16 @@ import traceback
 import pandas as pd
 import datetime as dt
 
+# INPUT FILES
 IMAGE_DIR = '/proj/shumagin/gnelson/plots/detections'
-MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
 IMAGE_DIR = 'E:\Glenn Nelson\science\eq_gaps\plots\detections'
-MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
-IMAGE_DIR = '.\detections'
+#IMAGE_DIR = '.\detections'
 STATION_FILE = 'E:\Glenn Nelson\science\eq_gaps\station_merge.csv'
 EV_REGION_FILE = 'E:\Glenn Nelson\science\eq_gaps\ev_selected_region.csv'
+# OUTPUT FILE
+MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
+MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
+
 DT_MATCH_VALUE = dt.timedelta(seconds=30)
 
 from functools import wraps
@@ -78,7 +81,7 @@ class EqTemplates:
 
     def find(self, ev_t, time_diff_sec=30, dt_format='%Y-%m-%dT%H-%M-%S'):
         '''
-        Match ev_t with template_time. Return a Dataframe of matches.
+        Match ev_t with template_time. Return a DataFrame of matches.
         Use this to lookup a template event and retrieve location.
         Or use it to discover if a detection is another event that is already present as a template.
         We're usually processing PNG images of match_filter detections. The filenames contain
@@ -95,89 +98,20 @@ class EqTemplates:
         #print(new_df)
         return new_df
 
-class MatchRecords:
-    # keep a list of all match images that we have reviewed
-    def __init__(self, csvfile = MATCH_RECORD_FILE):
-        self.recordFile = csvfile
-        self.df = None
-        self.matchFiles = []    # list of all filenames we've reviewed
-        if os.path.isfile(csvfile):
-            self.readFile()
+    def regionSelect(self, region='All'):
+        '''
+        Return a Dataframe of events in specified region.
+        Regions are used to break a study area into smaller parcels in order to limit the number
+        of templates that are used in Tribe.detect method. Regions are arbitrary and they can be named
+        with any string. I chose values from '0' to '7' for the Shumagin study.
+        :param region: string: 'All' or other values, e.g., '0' to '7'
+        :return: Dataframe that is a subset of all events
+        '''
+        if region == 'All':
+            return self.df
         else:
-            self.createDF()
-
-    def getFilenames(self):
-        return self.matchFiles
-
-    def createMatchFile(self, csvfile):
-        # new file, write header
-        f = open(csvfile, 'w', newline='')
-        writer = csv.writer(f)
-        writer.writerow(['file','templ_date','detect_date','quality','is_new'])
-        return f,writer
-
-    def createDF(self):
-        self.df = pd.DataFrame(columns=['file','templ_date','detect_date','region','quality','is_new'])
-
-    def readFile(self, csvfile):
-        self.df = pd.read_csv(csvfile, dtype={'region':'string'})
-        self.matchFiles = self.df['file'].tolist()
-
-    def saveMatch(self, match_file, templ_date, det_date, quality, is_new):
-        '''
-        Stores our evaluation of the match quality in file.
-        Also adds the match_file name to internal list so that we know we've seen it during this session.
-        :param match_file: filename of match image file
-        :param templ_date: date of the template (also embedded in the filename)
-        :param det_date: date of the detection (also embedded in the filename)
-        :param quality: evaluated quality of detection, a number from 1 to 4
-        :param is_new: False: if detection is another template that we already have.
-        :return:
-        '''
-        print('saveMatch: {},{},{},{},{}'.format(match_file,templ_date,det_date,quality,is_new))
-        tstr = templ_date.strftime('%Y-%m-%d %H:%M:%S')
-        dstr = det_date.strftime('%Y-%m-%d %H:%M:%S')
-        match = {'file':match_file,'templ_date':tstr,'detect_date':dstr,'quality':quality,'is_new':is_new}
-        #self.df = self.df.append([match_file,tstr,dstr,quality,is_new])
-        #self.df = self.df.append(match)
-        print(match)
-        newdf = pd.DataFrame([match,])
-        print(newdf)
-        self.df = pd.concat([self.df, newdf])
-        print('saveMatch: END')
-
-    def openMatchFile(self, csvfile = MATCH_RECORD_FILE):
-        nline = 0
-        # if file already exist, get last line of file so we can restart where we left off
-        with open(csvfile, 'r') as f:
-            line = None
-            for line in f:
-                if nline > 0:
-                    fname,_ = line.split(',',1)
-                    self.matchFiles.append(fname)
-                nline += 1
-        f = open(csvfile, 'a', newline='')
-        writer = csv.writer(f)
-        return f,writer
-
-    def storeMatchRecord(self, match_file, templ_date, det_date, quality, is_new):
-        '''
-        Stores our evaluation of the match quality in file.
-        Also adds the match_file name to internal list so that we know we've seen it during this session.
-        :param match_file: filename of match image file
-        :param templ_date: date of the template (also embedded in the filename)
-        :param det_date: date of the detection (also embedded in the filename)
-        :param quality: evaluated quality of detection, a number from 1 to 4
-        :param is_new: False: if detection is another template that we already have.
-        :return:
-        '''
-        self.matchFiles.append(match_file)
-        tstr = templ_date.strftime('%Y-%m-%d %H:%M:%S')
-        dstr = det_date.strftime('%Y-%m-%d %H:%M:%S')
-        self.writer.writerow([match_file, tstr, dstr, quality, is_new])
-
-    def close(self):
-        self.df.to_csv(self.recordFile, index=False)
+            new_df = self.df[self.df['region'] == region]
+            return new_df
 
 class MatchImages:
     '''
@@ -185,7 +119,13 @@ class MatchImages:
     Contains df (Pandas DataFrame) with templ_dt and region as columns.
     Method _findRegion will lookup the region by searching EqTemplates object.
     '''
-    def __init__(self, path, templates, match_file):
+    def __init__(self, path, templates, match_file, exclude_self=True):
+        '''
+        :param path: directory of all the detection image files
+        :param templates: EqTemplates object that contains info about all the templates we have used
+        :param match_file: filename for output of the detection image CSV 'database'
+        :param exclude: do not write template self-detection images into match_file
+        '''
         self.imageDir = path
         self.templates = templates
         self.match_file = match_file
@@ -249,11 +189,15 @@ class MatchImages:
 
     @classmethod
     def parseImageFilename(cls, imgName):
-        # extract template date and detection date
-        f,x = imgName.split('.')
-        t,d = f.split('_')
-        templ_date = dt.datetime.strptime(t[len('Templ-'):], '%Y-%m-%dT%H-%M-%S')
-        det_date = dt.datetime.strptime(d[len('Det-'):], '%Y-%m-%dT%H-%M-%S')
+        try:
+            # extract template date and detection date
+            f,x = imgName.split('.')
+            t,d = f.split('_')
+            templ_date = dt.datetime.strptime(t[len('Templ-'):], '%Y-%m-%dT%H-%M-%S')
+            det_date = dt.datetime.strptime(d[len('Det-'):], '%Y-%m-%dT%H-%M-%S')
+        except:
+            print('FATAL: parseImageFilename: {}'.format(f))
+            raise Exception('abort program')
         return templ_date,det_date
 
     @timing
@@ -317,18 +261,10 @@ class MatchImages:
         '''
         return self.df[self.df['quality'] == -1]
 
-    def selectRegion(self, region='All'):
-        '''
-        Return DF of files within a region
-        :param region: for Shumagin, '0' to '7'
-        :return:
-        '''
-        return self.df[self.df['region'] == region]
-
     def exclude(self, file):
         '''
         Exclude some templates from processing.
-        The purpose of this is to eliminate events from EqTraqnsformer until we sort out what's wrong.
+        The purpose of this is to eliminate events from EqTransformer until we sort out what's wrong.
         :param file: CSV file of events
         :return:
         '''
@@ -338,13 +274,24 @@ class MatchImages:
             for row in reader:
                 ev_dt = dt.datetime.strptime(row['time'][:19], '%Y-%m-%dT%H:%M:%S')
                 events.append(ev_dt)
-        #print('exclude: {}'.format(events[1]))
+        print('exclude events: {}'.format(len(events)))
         # TODO: this might be too slow
-        print('exclude: df has {} rows, events has {}'.format(self.df.shape[0], len(events)))
-        df = self.df[self.df['templ_dt'].isin(events)]
-        print('new df has {} rows'.format(df.shape[0]))
-        self.df = df
+        bad_df = self.df[self.df['templ_dt'].isin(events)]
+        print('exclude detections count: {}'.format(bad_df.shape[0]))
+        good_df = self.df[~self.df['templ_dt'].isin(events)]
+        print('good df count: {}'.format(good_df.shape[0]))
+        self.df = good_df
         self.savefile = True
+        
+    def exclude_self(self, time_diff_sec=30):
+        '''
+        Remove self-detection images: a template matches itself
+        '''
+        time_diff = dt.timedelta(seconds=time_diff_sec) # seconds
+        print('exclude_self:')
+        print('self.df has {} rows'.format(self.df.shape[0]))
+        self.df = self.df[~self.df.apply(lambda x: dt_match(x['templ_dt'], x['det_dt'], time_diff), axis=1)]
+        print('self.df has {} rows'.format(self.df.shape[0]))
 
     def readFile(self, file=MATCH_RECORD_FILE):
         date_cols = ['templ_dt', 'det_dt']
@@ -371,9 +318,8 @@ if __name__ == "__main__":
     matchImages = MatchImages(IMAGE_DIR, templates, MATCH_RECORD_FILE)
     if args.bad_file:
         matchImages.exclude(args.bad_file)
+    # remove any template self-detection
+    matchImages.exclude_self()
     matchImages.save()
-    if False:
-        matchRecords = MatchRecords(MATCH_RECORD_FILE)
-        matchRecords.close()
 
 
