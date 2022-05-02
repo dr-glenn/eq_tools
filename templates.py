@@ -2,8 +2,8 @@ import datetime as dt
 
 import pandas as pd
 
-from map_new_detect import EV_REGION_FILE, dt_match
-
+from config import EV_REGION_FILE
+from my_util import dt_match
 
 class EqTemplates:
     # maintain a list of all templates and enable lookup of their event data

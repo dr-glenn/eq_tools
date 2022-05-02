@@ -11,21 +11,8 @@ from matplotlib import cm   # colormap
 from mpl_toolkits.basemap import Basemap
 
 from templates import EqTemplates
-
-MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
-STATION_FILE = 'E:\Glenn Nelson\science\eq_gaps\station_merge.csv'
-EV_REGION_FILE = 'E:\Glenn Nelson\science\eq_gaps\ev_selected_region.csv'
-DT_MATCH_VALUE = dt.timedelta(seconds=30)
-
-def dt_match(dt1, dt2, dt_diff=DT_MATCH_VALUE):
-    '''
-    Compare datetime values. True if they differ by less than dt_diff
-    :param dt1: datetime value
-    :param dt2: datetime value
-    :param dt_diff: datetime.timedelta value
-    :return: True if match
-    '''
-    return abs(dt1 - dt2) < dt_diff
+from config import MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE
+from my_util import dt_match
 
 def mapSetup(axes, bbox):
     '''

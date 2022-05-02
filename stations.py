@@ -1,6 +1,6 @@
 import pandas as pd
 
-from eq_match_tool import STATION_FILE
+from config import STATION_FILE
 
 
 class Stations:

@@ -12,18 +12,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import math
+from templates import EqTemplates
+from config import MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE,DETECTION_PLOTS
 
-IMAGE_DIR = '/proj/shumagin/gnelson/plots/detections'
-MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
-IMAGE_DIR = 'E:\Glenn Nelson\science\eq_gaps\plots\detections'
-MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
-#IMAGE_DIR = '.\detections'
-STATION_FILE = 'E:\Glenn Nelson\science\eq_gaps\station_merge.csv'
-EV_REGION_FILE = 'E:\Glenn Nelson\science\eq_gaps\ev_selected_region.csv'
-DT_MATCH_VALUE = dt.timedelta(seconds=30)
+IMAGE_DIR = DETECTION_PLOTS
 
 from functools import wraps
 from time import time
+from my_util import dt_match
+
 # use as a decorator to time functions
 def timing(f):
     @wraps(f)
@@ -35,16 +32,6 @@ def timing(f):
               (f.__name__, args, kw, te-ts))
         return result
     return wrap
-
-def dt_match(dt1, dt2, dt_diff=DT_MATCH_VALUE):
-    '''
-    Compare datetime values. True if they differ by less than dt_diff
-    :param dt1: datetime value
-    :param dt2: datetime value
-    :param dt_diff: datetime.timedelta value
-    :return: True if match
-    '''
-    return abs(dt1 - dt2) < dt_diff
 
 def haversine(ll1, ll2):
     '''
@@ -100,55 +87,6 @@ def line_dist(ll1, ll2, ll3):
     dang_at = math.acos(math.cos(d13) / math.cos(dang_xt))
     d_at = dang_at * R  # along-track dist (to nearest point on LL1-LL2)
     return d_at,d_xt
-
-class EqTemplates:
-    # maintain a list of all templates and enable lookup of their event data
-    def __init__(self, csv_file=EV_REGION_FILE):
-        self.templ_csv = csv_file
-        # open the file with pandas
-        # it looks like this
-        # time,longitude,latitude,depth,mag,region,template,templ_file
-        # 2018-05-12T08:56:33.501000Z,-161.5485,54.3787,25500.0,2.2,0,2018-05-12T08:56:33.000000Z,2018_05_12t08_56_33.tgz
-        df = pd.read_csv(self.templ_csv, dtype={'region':'string'})
-        # convert 'time' to UTCDateTime
-        df['templ_dt'] = df['time'].apply(lambda tstr: dt.datetime.strptime(tstr[:19], '%Y-%m-%dT%H:%M:%S'))
-        df['depth'] = df['depth'].div(1000.0)
-        self.df = df.sort_values(by=['templ_dt'])
-        print(self.df)
-
-    def getDF(self):
-        return self.df
-
-    def find(self, ev_t, time_diff_sec=30, dt_format='%Y-%m-%dT%H-%M-%S'):
-        '''
-        Match ev_t with template_time. Return a Dataframe of matches.
-        Use this to lookup a template event and retrieve location.
-        Or use it to discover if a detection is another event that is already present as a template.
-        We're usually processing PNG images of match_filter detections. The filenames contain
-        both template datetime and detection datetime:
-        PNG filename example: Templ-2018-05-19T08-14-07_Det-2018-05-22T05-24-26.png
-        :param ev_t: datetime object, usually an event datetime from a match_filter PNG filename.
-        :param time_diff_sec: match if less than this value.
-        :param dt_format: not used?
-        :return: a Dataframe. Expect only one row in the df.
-        '''
-        # return the data from pandas with lat-long and region number
-        self.time_diff = dt.timedelta(seconds=time_diff_sec) # seconds
-        new_df = self.df[self.df['templ_dt'].apply(lambda x: dt_match(ev_t, x, self.time_diff))]
-        #print(new_df)
-        return new_df
-
-    def regionSelect(self, region='All'):
-        '''
-        Return a Dataframe of events in specified region.
-        :param region: string: 'All' or other values, '0' to '7' for Shumagin study
-        :return: Dataframe that is a subset of all events
-        '''
-        if region == 'All':
-            return self.df
-        else:
-            new_df = self.df[self.df['region'] == region]
-            return new_df
 
 class MatchImages:
     '''

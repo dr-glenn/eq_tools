@@ -17,11 +17,11 @@ The file has a value of -1 if the detection has not been evaluated.
 """
 import csv
 import os
-import sys
 import argparse
 import traceback
 import pandas as pd
 import datetime as dt
+from my_util import dt_match
 
 # INPUT FILES
 IMAGE_DIR = '/proj/shumagin/gnelson/plots/detections'
@@ -32,8 +32,6 @@ EV_REGION_FILE = 'E:\Glenn Nelson\science\eq_gaps\ev_selected_region.csv'
 # OUTPUT FILE
 MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
 MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
-
-DT_MATCH_VALUE = dt.timedelta(seconds=30)
 
 from functools import wraps
 from time import time
@@ -48,16 +46,6 @@ def timing(f):
         print('func:%r: took: %2.4f sec' % (f.__name__, te-ts))
         return result
     return wrap
-
-def dt_match(dt1, dt2, dt_diff=DT_MATCH_VALUE):
-    '''
-    Compare datetime values. True if they differ by less than dt_diff
-    :param dt1:
-    :param dt2:
-    :param dt_diff: datetime.timedelta value
-    :return: True if match
-    '''
-    return abs(dt1 - dt2) < dt_diff
 
 class EqTemplates:
     # maintain a list of all templates and enable lookup of their event data

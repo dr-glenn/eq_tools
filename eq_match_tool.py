@@ -17,18 +17,13 @@ from qt5_match import Ui_MainWindow
 import datetime as dt
 import numpy as np
 import pandas as pd
-#import csv
+
+from config import MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE,DETECTION_PLOTS
 from stations import Stations
 from templates import EqTemplates
+from my_util import dt_match
 
-IMAGE_DIR = '/proj/shumagin/gnelson/plots/detections'
-MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
-IMAGE_DIR = 'E:\Glenn Nelson\science\eq_gaps\plots\detections'
-MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
-#IMAGE_DIR = '.\detections'
-STATION_FILE = 'E:\Glenn Nelson\science\eq_gaps\station_merge.csv'
-EV_REGION_FILE = 'E:\Glenn Nelson\science\eq_gaps\ev_selected_region.csv'
-DT_MATCH_VALUE = dt.timedelta(seconds=30)
+IMAGE_DIR = DETECTION_PLOTS
 
 # PushButton styles to indicate that button is depressed
 # see: https://stackoverflow.com/questions/19508450/programmatically-toggle-a-python-pyqt-qpushbutton
@@ -77,16 +72,6 @@ def timing(f):
         return result
     return wrap
 
-def dt_match(dt1, dt2, dt_diff=DT_MATCH_VALUE):
-    '''
-    Compare datetime values. True if they differ by less than dt_diff
-    :param dt1: datetime value
-    :param dt2: datetime value
-    :param dt_diff: datetime.timedelta value
-    :return: True if match
-    '''
-    return abs(dt1 - dt2) < dt_diff
-
 class MatchImages:
     '''
     Images have filenames like this: Templ-2018-11-17T03-53-30_Det-2018-05-08T14-24-02.png.
@@ -99,7 +84,7 @@ class MatchImages:
     '''
     def __init__(self, path, templates, match_file=MATCH_RECORD_FILE):
         self.imageDir = path
-        self.templates = templates
+        self.templates = templates  # object of class EqTemplates
         self.match_file = match_file
         self.region_count = pd.DataFrame()
         self.index = -1 # row index in self.df
@@ -114,11 +99,9 @@ class MatchImages:
         # is_new =0 if the detected event is another template, =1 if it is new, or -1 if not yet evaluated
         self.df = self.readFile(match_file)
         self.df_select = self.df     # this will be the working view of self.df
-        # TODO: filtering already seen images should be optional so we can review old quality assignments
-        # select images that do not yet have 'quality' assigned
         self.image_files = []
         print('MatchImages: {} images before removeSeen'.format(self.df.shape[0]))
-        #self.showAll = False
+        # select images that do not yet have 'quality' assigned
         self.removeSeen()
         print('MatchImages: {} images'.format(len(self.image_files)))
         self.tallyRegions()
