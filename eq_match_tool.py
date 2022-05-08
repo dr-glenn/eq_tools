@@ -369,6 +369,11 @@ def mapSetup(axes, bbox):
 
 # See https://www.pythonguis.com/tutorials/first-steps-qt-creator/
 class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
+    '''
+    This class handles all the UI. There are individual methods for nearly every button or other control.
+    Radio buttons and some checkboxes are handled as a group. Some pushbuttons use lambda functions rather
+    than defining a separate method for each button.
+    '''
     def __init__(self, matchImages, stations, templates, **kwargs):
         super(MainWindow, self).__init__(**kwargs)
         self.setupUi(self)
@@ -393,6 +398,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.region_counts = self.matchImages.getRegionCounts()     # number of images for each region
         self.updateRegionSelect(self.region_counts)     # add regions to the select pulldown
         self.setRegionCountTable()      # create table that shows total/unseen images in each region
+
         ####### All GUI component setup should be completed before setupHandlers ########
         self.setupHandlers()
         # TODO: imageDir should not be here, we should be retrieving images from MatchImages class
