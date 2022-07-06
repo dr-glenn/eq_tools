@@ -2,6 +2,14 @@
 # The families will be plotted with time on X and location along strike (trench) on Y.
 # The template event is a different symbol from the matches found by EqCorrScan, but the events are connected by lines.
 '''
+EqCorrscan can generate template families when performing match_filter detection. However we are looking
+over a time period of a year and therefore the builtin family methods are not useful.
+In program my_detect.py we load a batch of templates from a geographic zone (creating a Tribe)
+and run match_filter (actually Tribe.detect) over the span of one day. my_detect.py continues to
+advance over the calendar, one day at a time.
+The file match_records.csv pairs a template with a detection: they are uniquely identified by datetime.
+We gather all rows of the same template and create a family of all the new detections.
+
 In order to plot templates according to distance along strike, use the 'cross track' calculation as given here:
 https://www.movable-type.co.uk/scripts/latlong.html
 '''
@@ -9,10 +17,15 @@ import os
 import sys
 import datetime as dt
 import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
+from matplotlib.dates import drange
+from matplotlib import cm   # colormap
 import pandas as pd
 import math
 from templates import EqTemplates
+from matches import MatchImages
 from config import MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE,DETECTION_PLOTS
 
 IMAGE_DIR = DETECTION_PLOTS
@@ -88,273 +101,7 @@ def line_dist(ll1, ll2, ll3):
     d_at = dang_at * R  # along-track dist (to nearest point on LL1-LL2)
     return d_at,d_xt
 
-class MatchImages:
-    '''
-    Images have filenames like this: Templ-2018-11-17T03-53-30_Det-2018-05-08T14-24-02.png
-    Contains df (Pandas DataFrame) with templ_dt and region as columns.
-    Method _findRegion will lookup the region by searching EqTemplates object.
-    '''
-    def __init__(self, path, templates, match_file=MATCH_RECORD_FILE):
-        self.imageDir = path
-        self.templates = templates
-        self.match_file = match_file
-        self.region_count = pd.DataFrame()
-        self.index = -1 # row index in self.df
-        self.region = 'All'
-        self.savefile = False
-        if not os.path.isfile(match_file):
-            print('ERROR: {} must be created by gen_csv.py'.format(match_file))
-            sys.exit(1)
-
-        # self.df has regions assigned to each image and columns for 'quality' and 'is_new'
-        self.df = self.readFile(match_file)
-        self.df_select = self.df     # this will be the working view of self.df
-        self.family_df = None
-        # TODO: filtering already seen images should be optional so we can review old quality assignments
-        # select images that do not yet have 'quality' assigned
-        self.image_files = []
-        print('MatchImages: {} images before removeSeen'.format(self.df.shape[0]))
-        self.removeSeen(seen=True, unseen=False)    # only look at images we've already seen
-        print('MatchImages: {} images'.format(len(self.image_files)))
-        self.tallyRegions()
-
-    @classmethod
-    def parseImageFilename(cls, imgName):
-        # extract template date and detection date
-        f,x = imgName.split('.')
-        t,d = f.split('_')
-        templ_date = dt.datetime.strptime(t[len('Templ-'):], '%Y-%m-%dT%H-%M-%S')
-        det_date = dt.datetime.strptime(d[len('Det-'):], '%Y-%m-%dT%H-%M-%S')
-        return templ_date,det_date
-
-    def readFile(self, file):
-        date_cols = ['templ_dt', 'det_dt']
-        df = pd.read_csv(file, dtype={'region':'string'}, parse_dates=date_cols)
-        return df
-
-    def getTemplateTimes(self):
-        '''
-        Generate list of unqiue template times
-        :return:
-        '''
-        pass
-
-    def getTemplateFamily(self, templ_dt):
-        '''
-        Get all rows associated with a template.
-        The rows from match_records.csv also tell us if the event is template-self, another template, or new event.
-        Also we get the quality and region values.
-        :param templ_dt: template datetime
-        :return: DataFrame with all the matching rows
-        '''
-        pass
-
-    @timing
-    def _findRegions(self, templates):
-        # Match all image filenames with assigned region for the template
-        # compare columns in 2 DF for matches: https://datascience.stackexchange.com/questions/33053/how-do-i-compare-columns-in-different-data-frames
-        #print(self.df)
-        cnt = 1
-        # TODO: need vast improvement in speed
-        # both templates and this use DF sorted by templ_dt
-        # iterate over rows of self.df
-        # lookup in templates.df, but don't use Pandas, instead just use a generator to find first match
-        # when match is found, assign the region to current row.
-        # no step forward in self.df, continue to assign region until row['templ_dt'] is different
-        tdt = None
-        for index,row in self.df.iterrows():
-            if cnt % 250 == 0:
-                print('findRegions: {}'.format(cnt))
-            cnt += 1
-            try:
-                templ_dt = row['templ_dt']
-                if tdt and templ_dt == tdt:
-                    # we already have the template that matches this event
-                    # don't waste time with templates.find()
-                    #print('cnt={}, dt={}'.format(cnt,templ_dt))
-                    pass
-                else:
-                    match = templates.find(templ_dt)  # return a DF of record from EV_SELECTED_REGION
-                    print('new match at {}, dt={}'.format(cnt,match.iloc[0]['templ_dt']))
-                tdt = templ_dt
-                if not match.empty:
-                    region = match.iloc[0]['region']
-                    if not region in self.regionLookup:
-                        self.regionLookup[region] = list()
-                    self.regionLookup[region].append(row['filename'])
-            except:
-                print('ERROR in _findRegions: file={}'.format(row['filename']))
-
-    def tallyRegions(self):
-        '''
-        Count of image files in each region. Fills a DataFrame with counts of all images in each region
-        and unseen images in each.
-        :return:
-        '''
-        # TODO: add a count of evaluated files
-        # region_count is a Series, number of images in each region
-        region_count = self.df['region'].value_counts()
-        region_count.rename('total', inplace=True)
-        print('Region\tCount\n{}'.format(region_count))
-        # if review checkbox is off, df_select is only images not yet evaluated.
-        # if review checkbox is on, df_select is all images.
-        # TODO: next two lines should only be one. Figure out about chained indexing.
-        unseen_df = self.df[self.df['quality'] == -1]
-        unseen_count = unseen_df['region'].value_counts()
-        unseen_count.rename('unseen', inplace=True)
-        # TODO: add a row for 'All' regions
-        print('Unseen\nRegion\tCount\n{}'.format(unseen_count))
-        self.region_count = pd.concat([region_count, unseen_count], axis=1)
-
-    def getRegionCounts(self):
-        '''
-        region_count index is the region name, columns are number of images: 'total' and 'unseen'
-        :return: DataFrame populated by method tallyRegions
-        '''
-        if self.region_count.empty:
-            self.tallyRegions()
-        return self.region_count
-
-    def getImageDir(self):
-        return self.imageDir
-
-    def removeSeen(self, seen=True, unseen=True):
-        '''
-        Remove some image files from list if they've been seen or not.
-        Modifies self.image_files
-        :param seen: if True, keep seen images, remove if False (inverse of expected behavior)
-        :param unseen: if True, keep unseen images, remove if False (inverse of expected behavior)
-        :return:
-        '''
-        if seen and unseen:     # keep all images
-            self.df_select = self.df
-        elif unseen:    # keep only unseen images
-            self.df_select = self.df[self.df['quality'] == -1]
-        else:           # keep only seen images
-            self.df_select = self.df[self.df['quality'] != -1]
-        print('removeSeen: seen={}, unseen={}, # images = {}'.format(seen, unseen, self.df_select.shape[0]))
-        self.image_files = self.df_select['filename'].tolist()
-
-    # TODO: probably not used
-    def getNext(self, view_seen=False, view_unseen=True):
-        '''
-        If review==False, then get next image that has not yet been reviewed from self.df_select.
-          If we've reached end of df_select, then return empty DF and caller will decide what to do.
-        If review==True, then get next image from df_select. It may have been evaluated already or not.
-          Caller will handle the UI setting of buttons.
-          If we've reached end of df_select, then return empty DF and lett caller decide what to do.
-        :param review:
-        :return:
-        '''
-        self.index += 1
-        retval = pd.DataFrame()     # empty DF
-        nimage = self.df_select.shape[0]
-        print('getNext: index={}, total={}'.format(self.index,nimage))
-        if self.index >= nimage:
-            print('getNext: no more images in current region, start at zero')
-            self.index = 0
-            # retval is empty DataFrame
-        if view_seen:
-            # get next image that has been reviewed or not
-            retval = self.df_select.iloc[self.index]
-        else:
-            # look for next image that has not yet been reviewed
-            while self.index < nimage:
-                #print(self.df_select.iloc[self.index]['quality'])
-                if self.df_select.iloc[self.index]['quality'] == -1:
-                    retval = self.df_select.iloc[self.index]
-                    break
-                self.index += 1
-        # if retval==df.empty, we've reached the end, caller of getNext must do something special
-        return retval
-
-    # TODO: probably not used
-    def getPrev(self, view_seen=False, view_unseen=True):
-        self.index -= 1
-        # TODO: must test index for end of DF
-        retval = pd.DataFrame()     # empty DF
-        # skip to next unseen
-        nimage = self.df_select.shape[0]
-        print('getPrev: index={}, total={}'.format(self.index,nimage))
-        if self.index < 0:
-            print('getPrev: wrap around to last image')
-            self.index = nimage-1
-            # retval is empty DataFrame
-        if view_seen:
-            # get next image that has been reviewed or not
-            retval = self.df_select.iloc[self.index]
-        else:
-            # look for next image that has not yet been reviewed
-            while self.index >= 0:
-                #print(self.df_select.iloc[self.index]['quality'])
-                if self.df_select.iloc[self.index]['quality'] == -1:
-                    retval = self.df_select.iloc[self.index]
-                    break
-                self.index -= 1
-        # if retval==df.empty, we've reached the end, caller of getPrev must do something special
-        return retval
-
-    def filterRegion(self, region='All', seen=False, unseen=True, quality=None):
-        '''
-        Remove image files from list unless they match the region parameter.
-        Region parameter is found in EqTemplates.
-        :param region: 'All' or other values, '0' to '7' for Shumagin study
-        :param unseen: True: only show images not yet reviewed; False: review all images
-        :param quality: list of quality match values for review. If None, then review all images.
-        :return:
-        '''
-        # TODO: should probably have a single method for filter that combines both region and 'seen'
-        # modifies self.image_files
-        self.removeSeen(seen=seen, unseen=unseen)
-        self.index = -1
-        if region == 'All':
-            self.df_select = self.df
-        else:
-            self.df_select = self.df[self.df['region'] == region]
-        # filter quality assessments when reviewing
-        if seen and quality:
-            # quality is a list of integers that we will review. 1 is no match, 4 is excellent match.
-            if unseen:  # if also looking at unseen images, must add -1 to quality list
-                quality.append(-1)
-            self.df_select = self.df_select[self.df_select['quality'].isin(quality)]
-        files = self.df_select['filename'].tolist()
-        # self.image_files is list of all files that have not been reviewed for quality
-        # files is list of all files in the region, regardless of review status
-        # use set intersection to get only image_files in region that have not been reviewed
-        files = set(self.image_files) & set(files)
-        print('filterRegion: {} has {} images'.format(region, len(files)))
-        self.image_files = sorted(list(files))
-        return self.image_files
-
-    def getFiles(self):
-        return self.image_files
-
-    def filter(self, quality=[3,4], is_new=[1,]):
-        '''
-        Filter the match events.
-        :param quality: list of quality values to select (1 to 4)
-        :param is_new: list. 1 is new events, 0 is events that are another template
-        :return:
-        '''
-        self.df_select = self.df[(self.df['quality'].isin(quality)) & (self.df['is_new'].isin(is_new))]
-
-    def family(self):
-        '''
-        Create DataFrame with template time and detection time.
-        Column 1 is template_dt, Column 2 is a list of all associated det_dt
-        :return:
-        '''
-        by_templ_dt = self.df_select.groupby(['templ_dt',])
-        by_templ_list = []
-        for tdt,frame in by_templ_dt:
-            flist = frame['det_dt'].tolist()
-            row = [tdt,flist]   # each row in new DF
-            by_templ_list.append(row)
-        # creates DF from dict. But the index is templ_dt and there is only one column that contains det_dt
-        # creates DF from list. The index is integers, first column is templ_dt, second is det_dt
-        self.family_df = pd.DataFrame.from_records(by_templ_list, columns=['templ_dt','det_dt'])
-        return self.family_df
-
+@timing
 def getFamilyEvents(templates, matches):
     '''
     Each template has 0 or more matches.
@@ -369,17 +116,65 @@ def getFamilyEvents(templates, matches):
     # add detect_df column to templates DF
     # lookup template events based on time, add number of new events as new column
     # TODO: this is pretty inefficient
-    templ_list = []
+    templ_list = []     # it will be a list of lists; each element is a single template event + all new detections
     for index,row in detect_df.iterrows():
-        templ = templates.find(row['templ_dt'])
+        templ = templates.find(row['templ_dt'])     # lookup template event info for the current row
         if not templ.empty:
-            templ_row = templ.iloc[0].tolist()
-            templ_row.append(row['det_dt'])
+            templ_row = templ.iloc[0].tolist()      # convert event info to a list
+            templ_row.append(row['det_dt'])         # append list of all matched detections
             templ_list.append(templ_row)
         else:
             print('SKIP: no match for {}'.format(row['templ_dt']))
 
     df_new = pd.DataFrame(data=templ_list, columns=['time','longitude','latitude','depth','mag','region','template','templ_file','templ_dt','det_dt'])
+    return df_new
 
-def main():
-    pass
+def plot(df, title):
+    # TODO: should use distance along strike
+    # plot using longitude as proxy for distance along strike
+    maxlon = df['longitude'].max()
+    minlon = df['longitude'].min()
+    # TODO: cannot do min/max of det_dt, because it is a list of times.
+    '''
+    mintime = (df[['templ_dt','det_dt']].min())
+    maxtime = (df[['templ_dt','det_dt']].max())
+    '''
+    # TODO: maybe should round down/up the times to month boundaries
+    mintime = df['templ_dt'].min()
+    maxtime = df['templ_dt'].max()
+    print('longitude limits = {}, {}'.format(minlon, maxlon))
+    print('time limits = {}, {}'.format(mintime, maxtime))
+
+    # X axis is time, Y axis is distance
+    fig, axs = plt.subplots(figsize=(12,10))
+    delta = dt.timedelta(days = 7)
+    dates = drange(mintime, maxtime, delta)
+    #dates = df['templ_dt'].values.tolist() # nope - converts to long int
+    dates = df['templ_dt']
+    print(dates[:5])
+    dists = df['longitude'].values.tolist()
+    print(dists[:5])
+    num_match = df['det_dt'].apply(lambda det: len(det) if len(det) < 8 else 8)
+    zmax = 8
+    my_cm = cm.get_cmap(name='rainbow', lut=zmax)    # sequence is violet-blue-green-orange-red
+    print(num_match[:5])
+    # NOTE! plot_date cannot assign different colors to each point.
+    #axs.plot_date(dates,dists, c=num_match, cmap=plt.get_cmap('Greens'))
+    scatter = axs.scatter(dates, dists, c=num_match, cmap=my_cm)
+    axs.legend(*scatter.legend_elements(), title='Matches', loc='lower right')
+    plt.title(title)
+    plt.show()
+
+def main(quality, is_new):
+    title = 'Quality={}, IS_New={}'.format(quality, is_new)
+    templates = EqTemplates()
+    matches = MatchImages(IMAGE_DIR, templates)
+    matches.filter(quality=quality, is_new=is_new)
+    family_df = getFamilyEvents(templates, matches)
+    print(family_df)
+    plot(family_df, title)
+
+if __name__ == '__main__':
+    quality = [3,4]
+    is_new  = [1,]
+    main(quality, is_new)

@@ -15,23 +15,21 @@ in order to run EqCorrScan with smaller numbers of templates for detection.
 quality: 4 is a very good match, 3 is a "maybe" match, 2 is a "maybe not" match, and 1 is "no match".
 The file has a value of -1 if the detection has not been evaluated.
 """
-import csv
 import os
 import argparse
 import traceback
+import csv
 import pandas as pd
 import datetime as dt
 from my_util import dt_match
+import config as cfg
 
 # INPUT FILES
-IMAGE_DIR = '/proj/shumagin/gnelson/plots/detections'
-IMAGE_DIR = 'E:\Glenn Nelson\science\eq_gaps\plots\detections'
-#IMAGE_DIR = '.\detections'
-STATION_FILE = 'E:\Glenn Nelson\science\eq_gaps\station_merge.csv'
-EV_REGION_FILE = 'E:\Glenn Nelson\science\eq_gaps\ev_selected_region.csv'
+IMAGE_DIR = cfg.DETECTION_PLOTS
+STATION_FILE = cfg.STATION_FILE
+EV_REGION_FILE = cfg.EV_REGION_FILE
 # OUTPUT FILE
-MATCH_RECORD_FILE = '/proj/shumagin/gnelson/match_records.csv'
-MATCH_RECORD_FILE = 'E:\Glenn Nelson\science\eq_gaps\match_records.csv'
+MATCH_RECORD_FILE = cfg.MATCH_RECORD_FILE
 
 from functools import wraps
 from time import time
@@ -169,8 +167,6 @@ class MatchImages:
             self.df = pd.concat([self.df_old,df_new])
         self.df = self.df.sort_values(by=['templ_dt'])
         print(self.df.iloc[0])
-        #print(self.df.iloc[1])
-        #print(self.df.iloc[2])
         print(self.df.iloc[-1])
         self.allFiles = sorted(self.df['filename'].tolist())
         self.files = self.allFiles
@@ -260,6 +256,7 @@ class MatchImages:
         with open(file, newline='') as f:
             reader = csv.DictReader(f)
             for row in reader:
+                # read 'time' but ignore fractional seconds
                 ev_dt = dt.datetime.strptime(row['time'][:19], '%Y-%m-%dT%H:%M:%S')
                 events.append(ev_dt)
         print('exclude events: {}'.format(len(events)))
@@ -270,7 +267,8 @@ class MatchImages:
         print('good df count: {}'.format(good_df.shape[0]))
         self.df = good_df
         self.savefile = True
-        
+        return bad_df['filename'].tolist()
+
     def exclude_self(self, time_diff_sec=30):
         '''
         Remove self-detection images: a template matches itself
@@ -305,9 +303,13 @@ if __name__ == "__main__":
     templates = EqTemplates()
     matchImages = MatchImages(IMAGE_DIR, templates, MATCH_RECORD_FILE)
     if args.bad_file:
-        matchImages.exclude(args.bad_file)
+        bad_files = matchImages.exclude(args.bad_file)
+        f = open('gen_csv_bad.txt', 'w')
+        f.write('# files from {}, you might want to remove these\n'.format(args.bad_file))
+        for bad in bad_files:
+            f.write(bad)
+            f.write('\n')
+        f.close()
     # remove any template self-detection
     matchImages.exclude_self()
     matchImages.save()
-
-

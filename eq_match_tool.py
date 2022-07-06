@@ -713,12 +713,17 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             print('clickNext: empty df: reset to All regions')
             self.messageBox.setText('Reset to All: no more images in current region')
             self.regionSelect.setCurrentIndex(0)
+            # if there are no more new images to view, then switch to review All
+            if (self.region_counts['unseen']==0).all():
+                # all regions have zero unseen images
+                self.viewSeenRB.setChecked(True)  # initialize to only view seen images
+                self.clickViewRB('seen')
         else:
-            self.messageBox.setText('')
-            self.imgName = df['filename']
-            print('clickNext: {}'.format(self.imgName))
-            self.changeImage(self.imgName)
-            self.setQualityButton(df['quality'])
+                self.messageBox.setText('')
+                self.imgName = df['filename']
+                print('clickNext: {}'.format(self.imgName))
+                self.changeImage(self.imgName)
+                self.setQualityButton(df['quality'])
 
     def setQualityButton(self, value):
         # first make all buttons appear disabled

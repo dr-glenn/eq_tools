@@ -1,7 +1,5 @@
 import datetime as dt
-
 import pandas as pd
-
 from config import EV_REGION_FILE
 from my_util import dt_match
 
