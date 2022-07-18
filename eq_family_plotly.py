@@ -16,11 +16,11 @@ https://www.movable-type.co.uk/scripts/latlong.html
 import os
 import sys
 import datetime as dt
-#import numpy as np
+import numpy as np
 import argparse
 import plotly.express as px
 import pandas as pd
-import math
+import haversine as hv
 from templates import EqTemplates
 from matches import MatchImages, getFamilyEvents
 import config as cfg
@@ -28,6 +28,7 @@ from config import MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE,DETECTION_PLOTS
 from my_util import dt_match
 
 IMAGE_DIR = DETECTION_PLOTS
+TEMPLATE_POLY = [ (-160.5,52.5), (-162.5,54.8), (-152.0,58.5), (-149.5,56.6), (-160.5,52.5) ]
 
 from functools import wraps
 from time import time
@@ -44,64 +45,18 @@ def timing(f):
         return result
     return wrap
 
-def haversine(ll1, ll2):
-    '''
-    Haversine method for great circle distance between 2 points on earth.
-    See: https://www.movable-type.co.uk/scripts/latlong.html
-    :param ll1: (longitude, latitude) numpy array in degrees
-    :param ll2:  (longitude, latitude) numpy array in degrees
-    :return: (a, c, d, bearing)
-    a is the square of half the chord length
-    c is the distance between points in radians
-    d is the disance between points in km
-    bearing is the initial bearing angle from ll1 to ll2
-    '''
-    # Using the haversine formula
-    # phi is latitude in radians
-    # theta is longitude in radians
-    # convert to radians
-    R = 6370.0
-    ll1rad = math.pi/180.0 * ll1
-    ll2rad = math.pi/180.0 * ll2
-    ldelta = ll2rad - ll1rad
-    phi_delta = ldelta[1]   # latitude in radians
-    theta_delta = ldelta[0] # longitude in radians (referneced paper uses lambda instead of theta)
-    # c is the angular distance in radians; a is the square of half of the chord length
-    a = math.sin(phi_delta/2)**2 + math.sin(theta_delta/2)**2 + math.cos(ll1rad[1]) * math.cos(ll2rad[1])
-    c = math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    d = R * c
-
-    # initial bearing from ll1 to ll2
-    y = math.sin(theta_delta) * math.cos(ll2rad[1])
-    x = math.cos(ll1rad[1]) * math.sin(ll2rad[1]) - math.sin(ll1rad[1]) * math.cos(ll2rad[1]) * math.cos(theta_delta)
-    theta = math.atan2(y, x)
-    bearing = (theta * 180.0/math.pi +360) % 360
-
-    return (a,c,d,theta)
-
-def line_dist(ll1, ll2, ll3):
-    '''
-    Great circle defined by two long-lat points, ll1 and ll2.
-    A point on the earth, ll3.
-    Compute closest point on great circle from ll3.
-    Compute distance along great circle and perpendicular distance from it.
-    :param ll1: (longitude, latitude) one point on great circle
-    :param ll2: (longitude, latitude) another point on great circle
-    :param ll3: (longitude, latitude) point somewhere on earth
-    :return: (dist along great circle, dist perpendicular) in km
-    '''
-    R = 6371E3     # radius of earth
-    a12,c12,d12,bearing12 = haversine(ll1, ll2)
-    a13,c13,d13,bearing13 = haversine(ll1, ll3)
-
-    dang_xt = math.asin(math.sin(c13) * math.sin(bearing13-bearing12))
-    d_xt = dang_xt * R  # cross-track dist (from LL3 to nearest point on LL1-LL2)
-    dang_at = math.acos(math.cos(d13) / math.cos(dang_xt))
-    d_at = dang_at * R  # along-track dist (to nearest point on LL1-LL2)
-    return d_at,d_xt
+def zone_bounds(ll0, ll1, nzone):
+    a12,c12,d12,bearing12 = hv.haversine(ll0, ll1)
+    print('region length = {} km'.format(d12))
+    dzone = d12 / nzone
+    # midpoints
+    #zones = [dzone * (float(i) + 0.5) for i in range(0,nzone)]
+    #endpoints
+    zones = [dzone * float(i) for i in range(0,nzone)]
+    return zones
 
 # TODO: should plot line segments that also connect templates together in the event that a match is not a new event
-def plot_matches(fam_df, fig, legend_colors, num_min=3):
+def plot_matches(fam_df, fig, legend_colors, num_min=3, yaxis='longitude'):
     '''
     Using family_df, add lines to template location plot where each line shows new event detections
     with datetime on X-axis and distance along strike on Y-axis.
@@ -111,16 +66,17 @@ def plot_matches(fam_df, fig, legend_colors, num_min=3):
     :param fig: plotly figure, this function adds to it
     :param legend_colors: list of discrete colors in the legend of the original plot
     :param num_min: minimum number of new detected events to plot (so that the figure isn't too cluttered)
+    :param yaxis: column name in fam_df for y-axis. 'longitude' or 'dist' are supported.
     :return:
     '''
-    df = fam_df[['templ_dt','longitude','det_dt','num_det']].copy()
+    df = fam_df[['templ_dt',yaxis,'det_dt','num_det']].copy()
     df['inum_det'] = pd.to_numeric(df['num_det'])
     new_df = df[df['inum_det'] >= num_min]
     for index,row in new_df.iterrows():
         inum = int(row['inum_det'])
-        yval = [row['longitude']] * inum
+        yval = [row[yaxis]] * inum
         color = legend_colors[inum-1]
-        print(yval)
+        #print(yval)
         fig.add_scatter(x=row['det_dt'], y=yval, mode='lines+markers', marker_symbol='diamond-open', marker_size=10,
                         line=dict(color=color), showlegend=False)
 
@@ -152,13 +108,27 @@ def plot_matches1(fam_df, fig, legend_colors, num_min=3):
         fig.add_scatter(x=xvals, y=yvals, mode='lines+markers', symbol=markers, marker_size=10,
                         line=dict(color=color), showlegend=False)
 
+def plot_zones(fig, xval, zones):
+    '''
+    Plot markers along Y-axis to designate the zones within our study region
+    :param fig:
+    :param xval:
+    :param zones:
+    :return:
+    '''
+    x = [xval] * (len(zones)-1)
+    fig.add_scatter(x=x, y=zones[1:], mode='markers', marker_color='black', marker_size=16, marker_symbol='triangle-right', showlegend=False)
+
 # use plotly
-def plot(df, num_min, title):
+def plot(df, num_min, title, yaxis='longitude'):
     '''
     Plot all templates in df with datetime on X-axis, location along strike on Y-axis.
+    This function only plots template events and color codes them for number of matches found.
     (NOTE: currently using longitude as proxy for distance along strike)
     :param df:
+    :param num_min: minimum family size to display as timelines
     :param title: title of plot
+    :param yaxis: 'longitude' or 'dist'. If 'dist', then mark zone boundaries on yaxis
     :return:
     '''
     '''
@@ -167,23 +137,33 @@ def plot(df, num_min, title):
     Values are offset to fit in range 0 to 9, but I don't think they're scaled.
     I am coloring the plot by number of matches for each template event, so the max should be 10.
     '''
-    if True:
-        # num_det are string values - want to get discrete colors
-        max_det = pd.to_numeric(df['num_det']).max()
-        legend_vals = [str(i) for i in range(1,max_det+1)]
-    else:
-        # num_det are int values - but then you get a continuous color spectrum
-        max_det = df['num_det'].max()
-        legend_vals = [str(i) for i in range(1,max_det+1)]
+    # num_det are int values - but then you get a continuous color spectrum - so convert to str
+    max_det = df['num_det'].max()
+    df['num_det'] = df['num_det'].apply(lambda x: str(int(x)))
+    legend_vals = [str(i) for i in range(1,max_det+1)]
     print('legend: {}'.format(legend_vals))
     legend_colors = px.colors.qualitative.Plotly    # a list of RGB values
-    #fig = px.scatter(df, x='templ_dt', y='longitude', color='num_det', title=title)    # unsorted legend
     # plot the template events as filled circles
-    fig = px.scatter(df, x='templ_dt', y='longitude', color='num_det', title=title,
+    fig = px.scatter(df, x='templ_dt', y=yaxis, color='num_det', title=title,
                      category_orders={'num_det': legend_vals}, hover_data=['latitude','longitude'])
     fig.update_traces(marker={'size':12})
-    # plot the families
-    plot_matches(df, fig, legend_colors, num_min=num_min)
+    # plot the families that are affiliated with a template
+    plot_matches(df, fig, legend_colors, num_min=num_min, yaxis=yaxis)
+
+    # plot the zone boundaries on the Y axis
+    if yaxis == 'dist':
+        endpt0 = np.asarray(TEMPLATE_POLY[0])
+        endpt3 = np.asarray(TEMPLATE_POLY[3])
+        zones = zone_bounds(endpt0, endpt3, 8)
+        print('Zone boundaries: {}'.format(zones))
+        xval = df['templ_dt'].min()     # datetime
+        # Want to plot zone markers at edge of y-axis. Unfortuntely y-axis is automatically scaled and plotly
+        # doesn't allow us to know the autoscale limits!
+        # So assume a few days earlier is OK.
+        #xval = xval - dt.timedelta(days=3)
+        xval = dt.datetime(year=xval.year, month=xval.month, day=1)
+        plot_zones(fig, xval, zones)
+
     fig.show()
 
 def getDetectionFiles():
@@ -218,7 +198,7 @@ def attachStationCounts(family_df, detect_dfs):
         df = detect_dfs[region][detect_dfs[region]['template_name'] == tdt]
         #print(df)
         det_dts = row['det_dt']
-        print('templ_dt={}, det_dts: {}'.format(tdt, det_dts))
+        #print('templ_dt={}, det_dts: {}'.format(tdt, det_dts))
         for det_dt in det_dts:
             match_df = df[df['detect_time'] == det_dt]
             if not match_df.empty:
@@ -233,6 +213,19 @@ def attachStationCounts(family_df, detect_dfs):
         #if index==1: print(row)
     print(family_df)
 
+def locationInBox(df):
+    '''
+    df has (longitude, latitude) of each event. Calculate position within study region bounds.
+    :param df: DataFrame is modified with 2 new columns.
+    :return:
+    '''
+    pt0 = np.asarray(TEMPLATE_POLY[0])
+    pt1 = np.asarray(TEMPLATE_POLY[3])
+    for index,row in df.iterrows():
+        dist, offset = hv.line_dist(pt0, pt1, np.asarray((row['longitude'], row['latitude'])))
+        df.at[index,'dist'] = dist
+        df.at[index,'offset'] = offset
+
 def main(quality, is_new, num_min=3):
     new_ev = 1 in is_new
     old_ev = 0 in is_new
@@ -241,12 +234,17 @@ def main(quality, is_new, num_min=3):
     matches = MatchImages(IMAGE_DIR, templates)
     matches.filter(quality=quality, is_new=is_new)
     family_df = getFamilyEvents(templates, matches)
-    family_df['n_sta'] = None
+    family_df['n_sta']  = None
+    family_df['dist']   = None
+    family_df['offset'] = None
+    locationInBox(family_df)
     print(family_df)
+    print('dist: {} to {}'.format(family_df['dist'].min(), family_df['dist'].max()))
+    print('offset: {} to {}'.format(family_df['offset'].min(), family_df['offset'].max()))
     det_dfs = getDetectionFiles()
     attachStationCounts(family_df, det_dfs)
     #print(family_df)
-    plot(family_df, num_min, title)
+    plot(family_df, num_min, title, yaxis='dist')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Display time plot of template families',formatter_class=argparse.ArgumentDefaultsHelpFormatter)

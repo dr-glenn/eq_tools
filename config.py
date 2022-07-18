@@ -6,24 +6,26 @@ LOCAL=True     # True if running on my desktop, False on "real" computers
 # so not all parameters here have valid values for a local run.
 
 if LOCAL:
-    PROG_DIR = 'E:\Glenn Nelson\science\eq_gaps'
+    PROG_DIR = 'E:/Glenn Nelson/science/eq_gaps/'
     FILES_DIR = PROG_DIR
     QUAKEML_DIR = FILES_DIR+'/quakeml/'
     # DETECTION are for match_filter or Tribe.detect outputs
 else:
-    PROG_DIR = '/home/gnelson/work/eq_gaps'
-    FILES_DIR = '/proj/shumagin/gnelson'
+    PROG_DIR = '/home/gnelson/work/eq_gaps/'
+    FILES_DIR = '/proj/shumagin/gnelson/'
     QUAKEML_DIR = '/proj/shumagin/quakeml/'
     # DETECTION are for match_filter or Tribe.detect outputs
-MSEED_DIR = FILES_DIR+'/mseed/'  # all station daily files
-DATA_HOME = FILES_DIR+'/data/'   # all station mseed organized by network
-TEMPLATE_DIR = FILES_DIR+'/templates/'
-TEMPLATE_PLOTS = FILES_DIR+'/plots/templates/'
-DETECTION_DIR = FILES_DIR+'/detections/'
-DETECTION_PLOTS = FILES_DIR+'/plots/detections/'
-STATION_FILE = FILES_DIR+'/station_merge.csv'
-EV_REGION_FILE = FILES_DIR+'/ev_selected_region.csv'
-MATCH_RECORD_FILE = FILES_DIR+'/match_records.csv'
+MSEED_DIR = FILES_DIR+'mseed/'  # all station daily files
+DATA_HOME = FILES_DIR+'data/'   # all station mseed organized by network
+TEMPLATE_DIR = FILES_DIR+'templates/'
+TEMPLATE_PLOTS = FILES_DIR+'plots/templates/'
+DETECTION_DIR = FILES_DIR+'detections/'
+DETECTION_PLOTS = FILES_DIR+'plots/detections/'
+REPICK_DIR = '/proj/shumagin/gnelson/repick/'
+
+STATION_FILE = FILES_DIR+'station_merge.csv'
+EV_REGION_FILE = FILES_DIR+'ev_selected_region.csv'
+MATCH_RECORD_FILE = FILES_DIR+'match_records.csv'
 EV_CATALOG = 'cat_out.xml'  # output from quakeml_filter.py
 EV_CSV = 'ev_selected.csv'  # output from quakeml_filter.py
 STATIONS_FILE = 'station_loc.csv'   # not used?

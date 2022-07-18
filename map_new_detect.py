@@ -12,7 +12,7 @@ from mpl_toolkits.basemap import Basemap
 
 from templates import EqTemplates
 from matches import MatchImages, getFamilyEvents
-from config import FILES_DIR,MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE
+from config import FILES_DIR,DETECTION_PLOTS,MATCH_RECORD_FILE,STATION_FILE,EV_REGION_FILE
 from my_util import dt_match
 
 ONLY_NEW = False
@@ -32,7 +32,8 @@ def mapSetup(axes, bbox):
     map.drawcountries(linewidth=0.25)
     map.fillcontinents(color='coral',lake_color='aqua')
     # draw the edge of the map projection region (the projection limb)
-    map.drawmapboundary(fill_color='aqua')
+    #map.drawmapboundary(fill_color='aqua')
+    map.drawmapboundary(fill_color='lightgrey')
     # draw lat/lon grid lines every 1 degrees.
     map.drawmeridians(np.arange(190,212,1), labels=[0,0,0,1])
     map.drawparallels(np.arange(52,59,1), labels=[1,1,0,0])
@@ -56,43 +57,13 @@ def makeMapPlot(map_axes, stations, events):
 
 # read template events
 templates = EqTemplates()
-
-# read the eq match quality file
-csv_file = MATCH_RECORD_FILE
-date_cols = ['templ_dt', 'det_dt']
-df = pd.read_csv(csv_file, dtype={'region':'string'}, parse_dates=date_cols)
-print('Match records total = {}'.format(df.shape[0]))
-
-# select quality 3 & 4
-if ONLY_NEW:
-    filt_df = df[(df['quality']>=3) & (df['is_new']==1)]
-else:
-    filt_df = df[(df['quality']>=3)]
-print('Match records quality 3 and 4 and only new {} = {}'.format(ONLY_NEW, filt_df.shape[0]))
-
-# gather unique template times and count of number of new events
-new_cnt = filt_df.groupby(['templ_dt']).size()
-#print(new_cnt)
-cnt_df = new_cnt.to_frame(name='number').reset_index()
-# cnt_df: index 0 to N-1, templ_dt, number of new events that match template
-#print(cnt_df)
-# create a list of all det_dt for each templ_dt and append
-
-# lookup template events based on time, add number of new events as new column
-# TODO: this is pretty inefficient
-templ_list = []
-for index,row in cnt_df.iterrows():
-    templ = templates.find(row['templ_dt'])
-    if not templ.empty:
-        templ_row = templ.iloc[0].tolist()
-        templ_row.append(row['number'])
-        templ_list.append(templ_row)
-    else:
-        print('no match for {}'.format(row['templ_dt']))
-
-df_new = pd.DataFrame(data=templ_list, columns=['time','longitude','latitude','depth','mag','region','template','templ_file','templ_dt','number'])
-
-print('Found {} templates with matches'.format(len(templ_list)))
+# read matches, filter and generate family DataFrame
+matches = MatchImages(DETECTION_PLOTS, templates)
+quality = [3,4]
+if ONLY_NEW: is_new = [1,]
+else: is_new = [0,1]
+matches.filter(quality=quality, is_new=is_new)
+df_new = getFamilyEvents(templates, matches)
 
 # plot on map
 fig,ax = plt.subplots(figsize=(10,9))
@@ -102,7 +73,8 @@ m = makeMapPlot(ax, None, None)
 lons = df_new['longitude'].tolist()
 lats = df_new['latitude'].tolist()
 x,y = m(lons, lats)
-z = df_new['number'].tolist()
+z = df_new['num_det'].tolist()
+#print(z)
 zmin = min(z)
 zmax = max(z)
 print('zmax = {}'.format(zmax))
@@ -110,7 +82,8 @@ print('zmax = {}'.format(zmax))
 #my_cm = cm.get_cmap('viridis', zmax)    # yellow is difficult to see and represents highest number
 #my_cm = cm.get_cmap('autumn', zmax)     # colors not distinct enough
 #my_cm = cm.get_cmap('brg', zmax)   # difficult to see green against blue ocean
-my_cm = cm.get_cmap('rainbow', zmax)    # sequence is violet-blue-green-orange-red
+#my_cm = cm.get_cmap('rainbow', zmax)    # sequence is violet-blue-green-orange-red
+my_cm = cm.get_cmap('jet', zmax)    # sequence is violet-blue-green-orange-red, but more contrast than rainbow
 labels = [str(i+1) for i in range(zmax)]
 #m.scatter(x, y, 5, marker='o', color='k')
 scatter = m.scatter(x, y, s=30, marker='o', c=z, cmap=my_cm)
