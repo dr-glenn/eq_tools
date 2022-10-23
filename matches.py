@@ -16,6 +16,7 @@ class MatchImages:
     This class contains df (Pandas DataFrame) with templ_dt and region as columns.
     Method _findRegion will lookup the region by searching EqTemplates object.
     '''
+    # TODO: should be able to instantiate with only match_file argument.
     def __init__(self, path, templates, match_file=MATCH_RECORD_FILE):
         self.imageDir = path
         self.templates = templates  # object of class EqTemplates
@@ -58,22 +59,8 @@ class MatchImages:
         df = pd.read_csv(file, dtype={'region':'string'}, parse_dates=date_cols)
         return df
 
-    def getTemplateTimes(self):
-        '''
-        Generate list of unique template times
-        :return:
-        '''
-        pass
-
-    def getTemplateFamily(self, templ_dt):
-        '''
-        Get all rows associated with a template.
-        The rows from match_records.csv also tell us if the event is template-self, another template, or new event.
-        Also we get the quality and region values.
-        :param templ_dt: template datetime
-        :return: DataFrame with all the matching rows
-        '''
-        pass
+    def getSelectedDF(self):
+        return self.df_select
 
     def tallyRegions(self):
         '''
@@ -108,6 +95,7 @@ class MatchImages:
     def getImageDir(self):
         return self.imageDir
 
+    # TODO: should rename as keepImages or useImages
     def removeSeen(self, seen=True, unseen=True):
         '''
         Remove some image files from list if they've been seen or not.
@@ -275,12 +263,45 @@ class MatchImages:
         new_df = self.df[self.df.filename.isin(self.df_select.filename) == False]
         return new_df
 
+    def quality_stats(self):
+        '''
+        Generate statistics of the quality of each template.
+        Tally the assigned quality values for each match.
+        Each template timestamp is a key in a dict. The dict values are a list of 5 numbers.
+        Index 0 is the mean value of the quality for all matches for the template.
+        Index 1 to 4 is the count of number of matches for each quality level 1 to 4.
+        :return: dict for each template timestamp
+        '''
+        templ_stats = dict()
+        # next line generates a count of each quality rating for each template
+        by_templ = self.df.groupby(['templ_dt','quality']).size()
+        cnt_df = by_templ.to_frame(name='count').reset_index()
+        # Don't want to print, it will be 4 lines for each template
+        print(cnt_df.to_string(index=False))
+        for tdt,row in cnt_df.iterrows():
+            tidx = row['templ_dt']
+            if not tidx in templ_stats:
+                templ_stats[tidx] = [0] * 5
+            qcount = templ_stats[tidx]
+            q = int(row['quality'])
+            qcount[q] = row['count']
+            templ_stats[tidx] = qcount   # includes index 0 which is not used yet
+
+        # average quality for each template
+        by_templ = self.df.groupby('templ_dt')['quality'].mean()
+        mean_df = by_templ.to_frame(name='mean').reset_index()
+        for tdt,row in mean_df.iterrows():
+            tidx = row['templ_dt']
+            templ_stats[tidx][0] = row['mean']
+        print(templ_stats)
+
     def family(self):
         '''
         Create DataFrame with template time and detection time.
         Column 1 is template_dt, Column 2 is a list of all associated det_dt
-        :param quality: only include matches greater or equal to quality value
-        :return:
+        :return: DF of families
+        NOTE: there may be templates that detected other templates. These detections need to be
+        consolidated into a single family.
         '''
         by_templ_dt = self.df_select.groupby(['templ_dt',])
         by_templ_list = []
@@ -333,18 +354,18 @@ class MatchImages:
         else:
             print('MatchImages.save: no update to {}'.format(self.match_file))
 
-def getFamilyEvents(templates, matches):
+def getFamilyEvents(templates, family_df):
     '''
     Each template has 0 or more matches.
     For each template, append the list of match times.
     The returned DataFrame can be plotted on maps or used to construct eq family plots of time and 1D location.
     :param templates: instance of EqTemplates
-    :param matches: instance of MatchImages
+    :param family_df: families found by families.Families
     :return: DataFrame with template hypocenter and list of detection times
     '''
     # Gather all templates that have matches and attach a list of each detection time
     # DataFrame with two columns: templ_dt (single datetime) and det_dt (list of detection datetimes)
-    family_df = matches.family()
+    #family_df = matches.family()
 
     # Now lookup each template time to fetch the hypocenter info.
     # Each row is a unique template event. Add information about the detections to each row.
@@ -354,9 +375,11 @@ def getFamilyEvents(templates, matches):
         templ = templates.find(row['templ_dt'])     # lookup template event info for the current row
         if not templ.empty:
             templ_row = templ.iloc[0].tolist()      # convert event info to a list
-            #templ_row.append(str(len(row['det_dt'])))  # number of detected events
-            templ_row.append(len(row['det_dt']))    # number of detected events
-            templ_row.append(row['det_dt'])         # append list of all matched detections
+            det_dt = []
+            det_dt.extend(row['old_dt'])
+            det_dt.extend(row['new_dt'])
+            templ_row.append(len(det_dt))    # number of detected events
+            templ_row.append(det_dt)         # append list of all matched detections
             templ_list.append(templ_row)
         else:
             # Unexpected that we will not match
@@ -364,4 +387,7 @@ def getFamilyEvents(templates, matches):
     # Each row in templ_list has the columns in the order shown - build a new DF
     df_new = pd.DataFrame(data=templ_list, columns=['time','longitude','latitude','depth','mag','region',
                                                     'template','templ_file','templ_dt','num_det','det_dt'])
+    # tally number of detection matches
+    match_count = df_new['num_det'].value_counts()
+    print('getFamilyEvents: num_det =\n{}'.format(match_count))
     return df_new
